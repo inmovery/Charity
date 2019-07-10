@@ -207,13 +207,6 @@ def check_ministry_health():
 def check_prosecutor():
     keyboard = VkKeyboard(one_time=True)
     prepare = ["Да, в Прокуратуру", "Да, в Росздравнадзор", "Нет, я никуда не обращался"]
-    for i in range(len(entities)):
-        pre_temp = entities[i]["entity"].split('_')
-        temp = ""
-        for i in range(len(pre_temp)):
-            temp += (pre_temp[i] + " ")
-        res = temp[0].upper() + temp[1:]
-        prepare.append(res)
     temp_for_long = []
     temp_for_little = []
     for i in range(len(prepare)):
@@ -910,3 +903,5 @@ def start():
                             #print("————————————————")
                     except ibm_watson.ApiException:
                         print("505 ошибка IBM Cloud")
+
+start()
