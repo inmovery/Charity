@@ -6,34 +6,12 @@ from os.path import basename
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText  # Текст/HTML
 from email.mime.application import MIMEApplication
-from clf import request_processing
 
 downloader_url = 'https://script.google.com/macros/s/AKfycbx2jWe4Rc3BG1BHTBdKuM7rhDaG2MB6ygWJnTA96o-6gk_JvJb6/exec'
 docid = open('answers-table-id').read()
 HOST = 'smtp.yandex.ru'
 addr_from = 'ortemmmm@yandex.ru'
 password = 'ortemx4ik'
-
-def renew_table():
-    r = requests.get(downloader_url + '?docid=' + docid)
-    if r.status_code == 200:
-        data = json.loads(r.text)
-    return data
-    # f = csv.writer(open("file.csv", "w"))
-    # for x in data['result']:
-    #     f.writerow([x])
-
-
-def get_template():
-    template_list = []
-    template_name = ''
-    return template_name
-
-
-def gather_letter():
-    letter = ''
-    return letter
-
 
 def send_mail(addr_to, doc):
     password = "ortemx4ik"  # Пароль

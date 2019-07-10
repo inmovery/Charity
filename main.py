@@ -9,8 +9,8 @@ from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import vk_api
 
-import clf
-import start
+from start import send_mail
+from clf import processing, request_processing
 
 
 #инициализация для выяввления ФИО
@@ -801,7 +801,6 @@ def start():
                                                 print()
                                                 # тут отправка сообщения оператору НКО
                                             else:
-                                                data = start.renew_table()
                                                 temp_for_reason = ["Препарата нет в продаже", "Нет инструкции", "Отсутствие инвалидности", "Не является необходимым для жизни", "Вместо льгот деньги", "Нарушение прав"]
                                                 res_reason = ""
                                                 for j in range(len(temp_for_reason)):
@@ -823,8 +822,8 @@ def start():
                                                 data['if_minzdrav'] = person.ministry_health.lower() == 'да'
                                                 data['if_older_3'] = int(person.age) >= 3
 
-                                                doc = clf.request_processing(data)
-                                                start.send_mail(person.email, doc)
+                                                doc = request_processing(data)
+                                                send_mail(person.email, doc)
 
                                             vk_session.method("messages.send",
                                                               {"user_id": event.user_id,
@@ -838,7 +837,6 @@ def start():
                                                 print()
                                                 # тут отправка сообщения оператору НКО
                                             else:
-                                                data = start.renew_table()
                                                 temp_for_reason = ["Препарата нет в продаже", "Нет инструкции",
                                                                    "Отсутствие инвалидности",
                                                                    "Не является необходимым для жизни",
@@ -863,8 +861,8 @@ def start():
                                                 data['if_minzdrav'] = person.ministry_health.lower() == 'да'
                                                 data['if_older_3'] = int(person.age) >= 3
 
-                                                doc = clf.request_processing(data)
-                                                start.send_mail(person.email, doc)
+                                                doc = request_processing(data)
+                                                send_mail(person.email, doc)
 
                                             vk_session.method("messages.send",
                                                               {"user_id": event.user_id,
@@ -903,5 +901,4 @@ def start():
                             #print("————————————————")
                     except ibm_watson.ApiException:
                         print("505 ошибка IBM Cloud")
-
 start()
