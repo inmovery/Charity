@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
+import os
 
 from docx import Document
 from docx.shared import Pt
@@ -53,55 +54,55 @@ def request_processing(data):
     if (not if_hospital) or (not if_comission):
         if representative_name != '':
             if if_tgsk:
-                doc_path = '/applications/hospital/больница ТГСК.docx'
+                doc_path = os.path.abspath('applications/hospital/больница ТГСК.docx')
             elif if_invalid:
-                doc_path = '/applications/hospital/больница по ТН 1.docx'
+                doc_path = os.path.abspath('applications/hospital/больница по ТН 1.docx')
             elif not if_older_3:
-                doc_path = '/applications/hospital/больница по ТН 2.docx'
+                doc_path = os.path.abspath('applications/hospital/больница по ТН 2.docx')
             else:
-                doc_path = '/applications/hospital/больница по ТН 3.docx'
+                doc_path = os.path.abspath('applications/hospital/больница по ТН 3.docx')
         else:
-            doc_path = '/applications/hospital/больница 5 взр.docx'
+            doc_path = os.path.abspath('applications/hospital/больница 5 взр.docx')
 
     elif not if_minzdrav:
         if representative_name != '':
             if reason == 4:
-                doc_path = '/applications/minzdrav/МЗ ребенок не входит в перечень.docx'
+                doc_path = os.path.abspath('applications/minzdrav/МЗ ребенок не входит в перечень.docx')
             elif reason == 6:
-                doc_path = '/applications/minzdrav/МинЗ доступность и качество.docx'
+                doc_path = os.path.abspath('applications/minzdrav/МинЗ доступность и качество.docx')
             else:
                 if if_invalid:
-                    doc_path = '/applications/minzdrav/МЗ ребенок 1.docx'
+                    doc_path = os.path.abspath('applications/minzdrav/МЗ ребенок 1.docx')
                 elif not if_older_3:
-                    doc_path = '/applications/minzdrav/МЗ ребенок 2.docx'
+                    doc_path = os.path.abspath('applications/minzdrav/МЗ ребенок 2.docx')
                 else:
-                    doc_path = '/applications/minzdrav/МЗ ребенок 3.docx'
+                    doc_path = os.path.abspath('applications/minzdrav/МЗ ребенок 3.docx')
         else:
             if reason == 4:
-                doc_path = '/applications/minzdrav/МЗ - взр общ не входит в перечень.docx'
+                doc_path = os.path.abspath('applications/minzdrav/МЗ - взр общ не входит в перечень.docx')
             elif reason == 6:
-                doc_path = '/applications/minzdrav/МинЗ доступность и качество.docx'
+                doc_path = os.path.abspath('applications/minzdrav/МинЗ доступность и качество.docx')
 
     else:
         if representative_name != '':
             if reason == 4:
-                doc_path = '/applications/procecutor_roszdrav/прокуратура ребенок не входит в перечень.docx'
+                doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура ребенок не входит в перечень.docx')
             elif reason == 6:
-                doc_path = '/applications/procecutor_roszdrav/прокуратура доступность и качество.docx'
+                doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура доступность и качество.docx')
             else:
                 if if_invalid:
-                    doc_path = '/applications/procecutor_roszdrav/прокуратура и росздрав ребенок инв.docx'
+                    doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура и росздрав ребенок инв.docx')
                 elif not if_older_3:
-                    doc_path = '/applications/procecutor_roszdrav/прокуратура и росздрав ребенок 3х.docx'
+                    doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура и росздрав ребенок 3х.docx')
                 else:
-                    doc_path = '/applications/procecutor_roszdrav/прокуратура ребенок 3.docx'
+                    doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура ребенок 3.docx')
         else:
             if reason == 4:
-                doc_path = '/applications/procecutor_roszdrav/прокуратура - взр общ не входит в перечень.docx'
+                doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура - взр общ не входит в перечень.docx')
             elif reason == 6:
-                doc_path = '/applications/procecutor_roszdrav/прокуратура доступность и качество.docx'
+                doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура доступность и качество.docx')
             else:
-                doc_path = '/applications/procecutor_roszdrav/прокуратура и росздрав - взр общ.docx'
+                doc_path = os.path.abspath('applications/procecutor_roszdrav/прокуратура и росздрав - взр общ.docx')
 
     document = Document(doc_path)
     new_document = processing(document, patient_name, representative_name, address,

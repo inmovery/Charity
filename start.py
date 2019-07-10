@@ -60,25 +60,3 @@ def send_mail(addr_to, doc):
     server.login(addr_from, password)  # Получаем доступ
     server.send_message(msg)  # Отправляем сообщение
     server.quit()  # Выходим
-
-
-def parse_data(data):
-    new_data = {}
-    birthday = list(map(int, data[3][:10].split('-')))
-    delta = datetime.date.today() - datetime.date(birthday[0], birthday[1], birthday[2])
-
-    new_data.update([{'representative_name': data[1],
-                      'patient_name': data[2],
-                      'address': data[4],
-                      'illness': data[5],
-                      'medicine': data[8],
-                      'telephone': str(data[10]),
-                      'reason': data[11][0],
-                      'if_tgsk': data[6].lower() == 'да',
-                      'if_invalid': data[7].lower() == 'да',
-                      'if_hospital': data[13].lower() == 'да',
-                      'if_comission': data[14].lower() == 'да',
-                      'if_minzdrav': data[15].lower() == 'да',
-                      'if_older_3': (delta.days // 1095) >= 3}])
-
-    return new_data

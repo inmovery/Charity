@@ -1,4 +1,6 @@
 import json
+import os
+
 import ibm_watson
 
 from natasha import NamesExtractor
@@ -378,505 +380,533 @@ list_diagnoses = ["Иммунодефицит неуточненный", "Деф
                   "Тяжелый комбинированный иммунодефицит", "Другие комбинированные иммунодефициты", "Общий вариабельный иммунодефицит неуточненный",
                   "Синдром Ниймеген", "Синдром Луи-Бар", "Агаммаглобулинемия неуточненная", "ХГБ, аутосомно-рецессивная",
                   "ТКИН неуточненный, синдром Оменн", "Другой вид ПИД"]
+def start():
+    while True:
+            # даныне пациентов или законных представителей
+            data_person = {}
 
-while True:
+            # для отслеживания потока пользователей
+            unique_users = []
 
-    # даныне пациентов или законных представителей
-    data_person = {}
+            for event in longpoll.listen():
+                if event.type == VkEventType.MESSAGE_NEW:
+                    response = event.text
 
-    # для отслеживания потока пользователей
-    unique_users = []
+                    person = DataPerson("", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                    try:
+                        if(event.user_id in unique_users): # пользователь уже записан
+                            person = data_person[str(event.user_id)]
+                            unique_users =  set(unique_users)
+                            unique_users = list(unique_users)
+                        else: #пользователь ещё не обращался к боту
+                            unique_users.append(event.user_id)
 
-    for event in longpoll.listen():
-        if event.type == VkEventType.MESSAGE_NEW:
-            response = event.text
+                        data_person[str(event.user_id)] = person
 
-            person = DataPerson("", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                        if event.from_user and not event.from_me:
 
-            if(event.user_id in unique_users): # пользователь уже записан
-                person = data_person[str(event.user_id)]
-                unique_users =  set(unique_users)
-                unique_users = list(unique_users)
-            else: #пользователь ещё не обращался к боту
-                unique_users.append(event.user_id)
+                            #создание сессии
+                            session = service.create_session("55340594-28fd-4e4a-879a-69b0c6f2fa04").get_result()
 
-            data_person[str(event.user_id)] = person
+                            #получение резалта
+                            resp = service.message(
+                                assistant_id='55340594-28fd-4e4a-879a-69b0c6f2fa04',
+                                session_id=session['session_id'],
+                                input={
+                                    'message_type': 'text',
+                                    'text': response
+                                }
+                            ).get_result()
 
-            if event.from_user and not event.from_me:
+                            # удаление сессии
+                            service.delete_session("55340594-28fd-4e4a-879a-69b0c6f2fa04",
+                                                    session['session_id']).get_result()
 
-                #создание сессии
-                session = service.create_session("55340594-28fd-4e4a-879a-69b0c6f2fa04").get_result()
+                            #вычисление ФИО пациента или законного представителя
+                            matches = extractor(response)
+                            spans = [_.span for _ in matches]
+                            facts = [_.fact.as_json for _ in matches]
 
-                #получение резалта
-                resp = service.message(
-                    assistant_id='55340594-28fd-4e4a-879a-69b0c6f2fa04',
-                    session_id=session['session_id'],
-                    input={
-                        'message_type': 'text',
-                        'text': response
-                    }
-                ).get_result()
+                            intents = ""
+                            if(len(resp["output"]["intents"]) < 1 and len(facts) < 1 and response != "Получение заявления" and
+                                    response != "вывод" and person.stepForDiagnosis != 1 and person.stepForTgsk != 1 and person.stepForDisability != 1 and
+                                    person.stepForEmail != 1 and person.stepForMobile != 1 and person.stepForCheckNeed != 1 and person.stepForQuestions != 1 and
+                                    person.stepForRepresentativeName != 1):
+                                vk_session.method("messages.send",
+                                                {"user_id": event.user_id, "message": "Не балуйтесь! Вводите только запрашиваемые данные!", "random_id": 0})
+                            elif(len(resp["output"]["intents"]) == 1):
+                                intents = resp["output"]["intents"][0]["intent"]
+                            entities = resp["output"]["entities"]
 
-                #вычисление ФИО пациента или законного представителя
-                matches = extractor(response)
-                spans = [_.span for _ in matches]
-                facts = [_.fact.as_json for _ in matches]
-
-                intents = ""
-                if(len(resp["output"]["intents"]) < 1 and len(facts) < 1 and response != "Получение заявления" and
-                        response != "вывод" and person.stepForDiagnosis != 1 and person.stepForTgsk != 1 and person.stepForDisability != 1 and
-                        person.stepForEmail != 1 and person.stepForMobile != 1 and person.stepForCheckNeed != 1 and person.stepForQuestions != 1 and
-                        person.stepForRepresentativeName != 1):
-                    vk_session.method("messages.send",
-                                    {"user_id": event.user_id, "message": "Не балуйтесь! Вводите только запрашиваемые данные!", "random_id": 0})
-                elif(len(resp["output"]["intents"]) == 1):
-                    intents = resp["output"]["intents"][0]["intent"]
-                entities = resp["output"]["entities"]
-
-                # Вступительная часть
-                if(intents == "приветствие" and response != "Получение заявления"):
-                    vk_session.method("messages.send",
-                                      {"user_id": event.user_id, "message": "Добрый день! Выбери услугу:", "random_id": 0,
-                                       'keyboard': start_keyboard()})
-                elif(response == "вывод"):
-                    temp = "Причина: " + person.rejection_reason + "\n" +\
-                           "ФИО пациента: " + person.patient_name + "\n" + \
-                           "ФИО законного представителя: " + person.representative_name + "\n" + \
-                           "Регион: " + person.region + "\n" +\
-                           "Возраст: " + person.age + "\n" +\
-                           "Диагноз: " + person.diagnosis + "\n" +\
-                           "ТГСК была проведена: " + person.tgsk + "\n" +\
-                           "Наличие инвалидности: " + person.disability + "\n" +\
-                           "E-mail: " + person.email + "\n" +\
-                           "Телефон: " + person.mobile + "\n" +\
-                           "Помощь с препаратами от фонда: " + person.help_with_drugs + "\n" +\
-                           "Обращение в больницу по месту жительства: " + person.appeal_hospital + "\n" +\
-                           "Была проведена Врачебная комиссия:" + person.hold_medical_commission + "\n" +\
-                           "Обращение в Минздрав: " + person.ministry_health + "\n" +\
-                           "Обращение в Прокуратуру и Росздравнадзор: " + person.prosecutor + "\n" +\
-                           "Обращение в суд: " + person.court_appeal
-                    vk_session.method("messages.send",
-                                      {"user_id": event.user_id,
-                                       "message": temp,
-                                       "random_id": 0})
-                elif(response == "Получение заявления"):
-                    vk_session.method("messages.send",
-                                      {"user_id": event.user_id, "message": "Продолжая общение с ботом вы соглашаетесь с обработкой ваших персональных данных.",
-                                       "random_id": 0})
-                    vk_session.method("messages.send",
-                                      {"user_id": event.user_id, "message": "По какой причине вам отказали:", "random_id": 0})
-                else:
-                    #если нашлась 1 подходящая причина
-                    if(len(entities) == 1 or len(facts) > 0 or intents == "регион" or intents == "возраст" or
-                            person.stepForDiagnosis == 1 or person.stepForRepresentativeName == 1 or person.stepForTgsk == 1 or person.stepForDisability == 1 or
-                            person.stepForEmail == 1 or person.stepForMobile == 1 or person.stepForCheckNeed == 1 or person.stepForQuestions == 1):
-                        if (person.stepRejectionReason != 1):
-                            print("Причина")
-                            pre_temp = entities[0]["entity"].split('_')
-                            temp = ""
-                            for i in range(len(pre_temp)):
-                                temp += (pre_temp[i] + " ")
-                            res = toUpper(temp)
-                            person.rejection_reason = res.rstrip()
-                            person.stepRejectionReason = 1  # заполнили причину отказа
-                            vk_session.method("messages.send",
-                                              {"user_id": event.user_id,
-                                               "message": "Причина записана! [" + person.rejection_reason + "]",
-                                               "random_id": 0})
-                            vk_session.method("messages.send",
-                                              {"user_id": event.user_id,
-                                               "message": "Введите ФИО пациента :",
-                                               "random_id": 0})
-                        elif (person.stepPatientName != 1 and person.stepRejectionReason == 1):
-                            print("ФИО пациента")
-                            if(len(facts[0]) < 3):
-                                person.patient_name = ""
-                                vk_session.method("messages.send", {"user_id": event.user_id,
-                                "message": "Введите ФИО полностью!",
-                                "random_id": 0})
+                            # Вступительная часть
+                            if(intents == "приветствие" and response != "Получение заявления"):
+                                vk_session.method("messages.send",
+                                                  {"user_id": event.user_id, "message": "Добрый день! Выбери услугу:", "random_id": 0,
+                                                   'keyboard': start_keyboard()})
+                            elif(response == "вывод"):
+                                temp = "Причина: " + person.rejection_reason + "\n" +\
+                                       "ФИО пациента: " + person.patient_name + "\n" + \
+                                       "ФИО законного представителя: " + person.representative_name + "\n" + \
+                                       "Регион: " + person.region + "\n" +\
+                                       "Возраст: " + person.age + "\n" +\
+                                       "Диагноз: " + person.diagnosis + "\n" +\
+                                       "ТГСК была проведена: " + person.tgsk + "\n" +\
+                                       "Наличие инвалидности: " + person.disability + "\n" +\
+                                       "E-mail: " + person.email + "\n" +\
+                                       "Телефон: " + person.mobile + "\n" +\
+                                       "Помощь с препаратами от фонда: " + person.help_with_drugs + "\n" +\
+                                       "Обращение в больницу по месту жительства: " + person.appeal_hospital + "\n" +\
+                                       "Была проведена Врачебная комиссия:" + person.hold_medical_commission + "\n" +\
+                                       "Обращение в Минздрав: " + person.ministry_health + "\n" +\
+                                       "Обращение в Прокуратуру и Росздравнадзор: " + person.prosecutor + "\n" +\
+                                       "Обращение в суд: " + person.court_appeal
+                                vk_session.method("messages.send",
+                                                  {"user_id": event.user_id,
+                                                   "message": temp,
+                                                   "random_id": 0})
+                            elif(response == "Получение заявления"):
+                                vk_session.method("messages.send",
+                                                  {"user_id": event.user_id, "message": "Продолжая общение с ботом вы соглашаетесь с обработкой ваших персональных данных.",
+                                                   "random_id": 0})
+                                vk_session.method("messages.send",
+                                                  {"user_id": event.user_id, "message": "По какой причине вам отказали:", "random_id": 0})
                             else:
-                                person.patient_name = toUpper(facts[0]["last"]) + " " + toUpper(
-                                    facts[0]["first"]) + " " + toUpper(facts[0]["middle"])
-                                person.stepPatientName = 1
-                                person.stepForRepresentativeName = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "ФИО записаны! [" + person.patient_name + "]",
-                                                   "random_id": 0})
+                                #если нашлась 1 подходящая причина
+                                if(len(entities) == 1 or len(facts) > 0 or intents == "регион" or intents == "возраст" or
+                                        person.stepForDiagnosis == 1 or person.stepForRepresentativeName == 1 or person.stepForTgsk == 1 or person.stepForDisability == 1 or
+                                        person.stepForEmail == 1 or person.stepForMobile == 1 or person.stepForCheckNeed == 1 or person.stepForQuestions == 1):
+                                    if (person.stepRejectionReason != 1):
+                                        print("Причина")
+                                        pre_temp = entities[0]["entity"].split('_')
+                                        temp = ""
+                                        for i in range(len(pre_temp)):
+                                            temp += (pre_temp[i] + " ")
+                                        res = toUpper(temp)
+                                        person.rejection_reason = res.rstrip()
+                                        person.stepRejectionReason = 1  # заполнили причину отказа
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "Причина записана! [" + person.rejection_reason + "]",
+                                                           "random_id": 0})
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "Введите ФИО пациента :",
+                                                           "random_id": 0})
+                                    elif (person.stepPatientName != 1 and person.stepRejectionReason == 1):
+                                        print("ФИО пациента")
+                                        if (len(facts[0]) < 3):
+                                            person.patient_name = toUpper(facts[0]["last"]) + " " + toUpper(
+                                                facts[0]["first"])
+                                        else:
+                                            person.patient_name = toUpper(facts[0]["last"]) + " " + toUpper(
+                                                facts[0]["first"]) + " " + toUpper(facts[0]["middle"])
+                                        person.stepPatientName = 1
+                                        person.stepForRepresentativeName = 1
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "ФИО записаны! [" + person.patient_name + "]",
+                                                           "random_id": 0})
 
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Пациент является своим законным представителем ?",
-                                                   "random_id": 0,
-                                                   'keyboard': check_representative_name()})
-                        elif (person.stepCheckRepresentativeName != 1 and person.stepPatientName == 1):
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "Пациент является своим законным представителем ?",
+                                                           "random_id": 0,
+                                                           'keyboard': check_representative_name()})
+                                    elif (person.stepCheckRepresentativeName != 1 and person.stepPatientName == 1):
 
-                            print("Проверка ФИО законного представителя")
-                            if(response == "Да, является"):
-                                person.representative_name = ""
-                                person.stepCheckRepresentativeName = 1
-                                person.stepRepresentativeName = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Введите регион (республика, край, область, округ), в котором вы проживаете:",
-                                                   "random_id": 0})
-                            elif(response == "Нет, не является"):
-                                person.stepCheckRepresentativeName = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Введите ФИО законного представителя :",
-                                                   "random_id": 0})
-                        elif(person.stepRepresentativeName != 1 and person.stepCheckRepresentativeName == 1):
-                            if (len(facts[0]) < 3):
-                                person.representative_name = ""
-                                vk_session.method("messages.send", {"user_id": event.user_id,
-                                                                    "message": "Введите ФИО полностью!",
-                                                                    "random_id": 0})
-                            else:
-                                person.representative_name = toUpper(facts[0]["last"]) + " " + toUpper(
-                                    facts[0]["first"]) + " " + toUpper(facts[0]["middle"])
-                                person.stepRepresentativeName = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "ФИО записаны! [" + person.representative_name + "]",
-                                                   "random_id": 0})
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Введите регион (республика, край, область, округ), в котором вы проживаете:",
-                                                   "random_id": 0})
-                        elif (person.stepRegion != 1 and person.stepRepresentativeName == 1):
-                            print("Регион")
-                            if(intents == "регион"):
-                                person.stepRegion = 1
-                                person.region = response
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Регион записан! [" + person.region + "]",
-                                                   "random_id": 0})
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Введите возраст пациента:",
-                                                   "random_id": 0})
-                        elif (person.stepAge != 1 and person.stepRegion == 1):
-                            print("Возраст")
-                            if (intents == "возраст"):
-                                person.stepForDiagnosis = 1
-                                person.stepAge = 1
-                                for_res = ""
-                                for j in range(len(response)):
-                                    if(response[j].isdigit()):
-                                        for_res += response[j]
-                                person.age = for_res
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Возраст записан! [" + person.age + "]",
-                                                   "random_id": 0})
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Введите дианоз пациента :",
-                                                   "random_id": 0})
-                        elif (person.stepDiagnosis != 1 and person.stepAge == 1):
-                            print("Диагноз")
-                            one = ""
-                            two = ""
-                            temp_for = {}
-                            ok = False
-                            # если выбран 100% правильный диагноз
-                            for j in range(len(list_diagnoses)):
-                                if (int(search_partial_text(response.lower(), list_diagnoses[j].lower())) == 100):
-                                    ok = True
-                                    break
-                            if (ok):
-                                person.stepForTgsk = 1
-                                person.stepDiagnosis = 1
-                                person.diagnosis = response
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Диагноз записан! [" + person.diagnosis + "]",
-                                                   "random_id": 0})
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "У пациента была проведена ТГСК (Трансплантация гемопоэтических стволовых клеток) :",
-                                                   "random_id": 0,
-                                                   'keyboard': hold_TGSK()})
-                            else:
-                                for j in range(len(list_diagnoses)):
-                                    if(int(search_partial_text(response.lower(), list_diagnoses[j].lower())) < 100):
-                                        temp_for[str(list_diagnoses[j])] = int(search_partial_text(response.lower(), list_diagnoses[j].lower()))
-                                list_temp_for = list(temp_for.items())
-                                list_temp_for.sort(key=lambda i: i[1])
-                                d = 0
-                                for j in list_temp_for:
-                                    print(str(j[0]) + " : " + str(j[1]))
-                                    d = d + 1
-                                    if(d == 14):
-                                        two = j[0]
-                                    elif(d == 15):
-                                        one = j[0]
-                                print("one: " + one + "\ntwo: " + two)
-                                prepare = [one, two]
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Возможно вы имели ввиду:",
-                                                   "random_id": 0,
-                                                   'keyboard': check_diagnoses(prepare)})
-                        elif (person.stepTgsk != 1 and person.stepDiagnosis == 1):
-                            print("ТГСК")
-                            if(response == "Нет, ТГСК не была проведена"):
-                                person.stepTgsk = 1
-                                person.tgsk = "Нет"
-                                if(person.rejection_reason == "Отсутствие инвалидности"):
-                                    person.stepDisability = 1
-                                    person.disability = "Нет"
+                                        print("Проверка ФИО законного представителя")
+                                        if(response == "Да, является"):
+                                            person.representative_name = ""
+                                            person.stepCheckRepresentativeName = 1
+                                            person.stepRepresentativeName = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Введите регион (республика, край, область, округ), в котором вы проживаете:",
+                                                               "random_id": 0})
+                                        elif(response == "Нет, не является"):
+                                            person.stepCheckRepresentativeName = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Введите ФИО законного представителя :",
+                                                               "random_id": 0})
+                                    elif(person.stepRepresentativeName != 1 and person.stepCheckRepresentativeName == 1):
+                                        if(len(facts[0]) < 3):
+                                            person.representative_name = toUpper(facts[0]["last"]) + " " + toUpper(
+                                                facts[0]["first"])
+                                        else:
+                                            person.representative_name = toUpper(facts[0]["last"]) + " " + toUpper(
+                                                facts[0]["first"]) + " " + toUpper(facts[0]["middle"])
+                                        person.stepRepresentativeName = 1
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "ФИО записаны! [" + person.representative_name + "]",
+                                                           "random_id": 0})
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "Введите регион (республика, край, область, округ), в котором вы проживаете:",
+                                                           "random_id": 0})
+                                    elif (person.stepRegion != 1 and person.stepRepresentativeName == 1):
+                                        print("Регион")
+                                        if(intents == "регион"):
+                                            person.stepRegion = 1
+                                            person.region = response
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Регион записан! [" + person.region + "]",
+                                                               "random_id": 0})
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Введите возраст пациента:",
+                                                               "random_id": 0})
+                                    elif (person.stepAge != 1 and person.stepRegion == 1):
+                                        print("Возраст")
+                                        if (intents == "возраст"):
+                                            person.stepForDiagnosis = 1
+                                            person.stepAge = 1
+                                            for_res = ""
+                                            for j in range(len(response)):
+                                                if(response[j].isdigit()):
+                                                    for_res += response[j]
+                                            person.age = for_res
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Возраст записан! [" + person.age + "]",
+                                                               "random_id": 0})
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Введите дианоз пациента :",
+                                                               "random_id": 0})
+                                    elif (person.stepDiagnosis != 1 and person.stepAge == 1):
+                                        print("Диагноз")
+                                        one = ""
+                                        two = ""
+                                        temp_for = {}
+                                        ok = False
+                                        # если выбран 100% правильный диагноз
+                                        for j in range(len(list_diagnoses)):
+                                            if (int(search_partial_text(response.lower(), list_diagnoses[j].lower())) == 100):
+                                                ok = True
+                                                break
+                                        if (ok):
+                                            person.stepForTgsk = 1
+                                            person.stepDiagnosis = 1
+                                            person.diagnosis = response
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Диагноз записан! [" + person.diagnosis + "]",
+                                                               "random_id": 0})
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "У пациента была проведена ТГСК (Трансплантация гемопоэтических стволовых клеток) :",
+                                                               "random_id": 0,
+                                                               'keyboard': hold_TGSK()})
+                                        else:
+                                            for j in range(len(list_diagnoses)):
+                                                if(int(search_partial_text(response.lower(), list_diagnoses[j].lower())) < 100):
+                                                    temp_for[str(list_diagnoses[j])] = int(search_partial_text(response.lower(), list_diagnoses[j].lower()))
+                                            list_temp_for = list(temp_for.items())
+                                            list_temp_for.sort(key=lambda i: i[1])
+                                            d = 0
+                                            for j in list_temp_for:
+                                                print(str(j[0]) + " : " + str(j[1]))
+                                                d = d + 1
+                                                if(d == 14):
+                                                    two = j[0]
+                                                elif(d == 15):
+                                                    one = j[0]
+                                            print("one: " + one + "\ntwo: " + two)
+                                            prepare = [one, two]
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Возможно вы имели ввиду:",
+                                                               "random_id": 0,
+                                                               'keyboard': check_diagnoses(prepare)})
+                                    elif (person.stepTgsk != 1 and person.stepDiagnosis == 1):
+                                        print("ТГСК")
+                                        if(response == "Нет, ТГСК не была проведена"):
+                                            person.stepTgsk = 1
+                                            person.tgsk = "Нет"
+                                            if(person.rejection_reason == "Отсутствие инвалидности"):
+                                                person.stepDisability = 1
+                                                person.disability = "Нет"
+                                                vk_session.method("messages.send",
+                                                                  {"user_id": event.user_id,
+                                                                   "message": "Перечислите препараты, прописанные пациенту через запятую :",
+                                                                   "random_id": 0})
+                                            else:
+                                                vk_session.method("messages.send",
+                                                                  {"user_id": event.user_id,
+                                                                   "message": "У пациента есть инвалидность ?",
+                                                                   "random_id": 0,
+                                                                   'keyboard':check_disability()})
+                                        elif(response == "Да, ТГСК была проведена"):
+                                            person.stepForDisability = 1
+                                            person.stepTgsk = 1
+                                            person.tgsk = "Да"
+                                            if (person.rejection_reason == "Отсутствие инвалидности"):
+                                                person.stepDisability = 1
+                                                person.disability = "Нет"
+                                                vk_session.method("messages.send",
+                                                                  {"user_id": event.user_id,
+                                                                   "message": "Перечислите препараты, прописанные пациенту через запятую :",
+                                                                   "random_id": 0})
+                                            else:
+                                                vk_session.method("messages.send",
+                                                                  {"user_id": event.user_id,
+                                                                   "message": "У пациента есть инвалидность ?",
+                                                                   "random_id": 0,
+                                                                   'keyboard': check_disability()})
+                                    elif (person.stepDisability != 1 and person.stepTgsk == 1):
+                                        print("Инвалидность")
+                                        if(response == "Да, инвалидность есть"):
+                                            person.stepDisability = 1
+                                            person.disability = "Да"
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Перечислите препараты, прописанные пациенту через запятую :",
+                                                               "random_id": 0})
+                                        elif(response == "Инвалидность отсутствует"):
+                                            person.stepDisability = 1
+                                            person.disability = "Нет"
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Перечислите препараты, прописанные пациенту через запятую :",
+                                                               "random_id": 0})
+                                    elif (person.stepDrugs != 1 and person.stepDisability == 1):
+                                        print("Препараты")
+                                        res = response.split(',')
+                                        for j in range(len(res)):
+                                            person.drugs += res[j].strip()
+                                        person.stepDrugs = 1
+                                        person.stepForEmail = 1
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "Введите контактный E-mail :",
+                                                           "random_id": 0})
+                                    elif (person.stepEmail != 1 and person.stepDrugs == 1):
+                                        print("Email")
+                                        person.email = response
+                                        person.stepEmail = 1
+                                        person.stepForMobile = 1
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "Введите контактный телефон :",
+                                                           "random_id": 0})
+                                    elif (person.stepMobile != 1 and person.stepEmail == 1):
+                                        print("Телефон")
+                                        person.mobile = response
+                                        person.stepMobile = 1
+                                        person.stepForCheckNeed = 1
+                                        vk_session.method("messages.send",
+                                                          {"user_id": event.user_id,
+                                                           "message": "Нужна помощь с препаратами от фонда ?",
+                                                           "random_id": 0,
+                                                           "keyboard": check_help_with_drugs()})
+                                    elif (person.stepHelpWithDrugs != 1 and person.stepMobile == 1):
+                                        if(response == "Да, помощь с препаратами нужна"):
+                                            person.help_with_drugs = "Да"
+                                            person.stepHelpWithDrugs = 1
+                                            person.stepForQuestions = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в больницу по месту жительства ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_request_hospital()})
+                                        elif(response == "Нет, помощь с препаратами не нужна"):
+                                            person.help_with_drugs = "Нет"
+                                            person.stepHelpWithDrugs = 1
+                                            person.stepForQuestions = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Обращались ли вы в больницу по месту жительства ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_request_hospital()})
+                                    elif (person.stepAppealHospital != 1 and person.stepHelpWithDrugs == 1):
+                                        if(response == "Да, в больницу обращался(лась)"):
+                                            person.appeal_hospital = "Да"
+                                            person.stepAppealHospital = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Была проведена врачебная комиссия ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_medical_commission()})
+                                        elif(response == "Нет, в больницу не обращался(лась)"):
+                                            person.appeal_hospital = "Нет"
+                                            person.stepAppealHospital = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Была проведена врачебная комиссия ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_medical_commission()})
+                                    elif (person.stepHoldMedicalCommission != 1 and person.stepHelpWithDrugs == 1):
+                                        if(response == "Да, была проведена"):
+                                            person.hold_medical_commission = "Да"
+                                            person.stepHoldMedicalCommission = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в орган исполнительной власти в сфере здравоохранения (Минздрав) ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_ministry_health()})
+                                        elif(response == "Нет, не была проведена"):
+                                            person.hold_medical_commission = "Нет"
+                                            person.stepHoldMedicalCommission = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в орган исполнительной власти в сфере здравоохранения (Минздрав) ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_ministry_health()})
+                                    elif (person.stepMinistryHealth != 1 and person.stepHoldMedicalCommission == 1):
+                                        if (response == "Да, в Минздрав обращался(лась)"):
+                                            person.ministry_health = "Да"
+                                            person.stepMinistryHealth = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в контроллирующие органы государственной власти (Прокуратуру и Росздравнадзор) ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_prosecutor()})
+                                        elif (response == "Нет, в Минздрав не обращался(лась)"):
+                                            person.ministry_health = "Нет"
+                                            person.stepMinistryHealth = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в контроллирующие органы государственной власти (Прокуратуру и Росздравнадзор) ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_prosecutor()})
+                                    elif (person.stepProsecutor != 1 and person.stepMinistryHealth == 1):
+                                        if (response == "Да, в Прокуратуру"):
+                                            person.prosecutor = "Да"
+                                            person.stepProsecutor = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в суд ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_court()})
+                                        elif (response == "Да, в Росздравнадзор"):
+                                            person.prosecutor = "Да"
+                                            person.stepProsecutor = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в суд ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_court()})
+                                        elif (response == "Нет, я никуда не обращался"):
+                                            person.prosecutor = "Нет"
+                                            person.stepProsecutor = 1
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Вы обращались в суд ?",
+                                                               "random_id": 0,
+                                                               "keyboard": check_court()})
+                                    elif (person.stepCourtAppeal != 1 and person.stepProsecutor == 1):
+                                        if (response == "Да, я обращался(лась) в суд"):
+                                            person.court_appeal = "Да"
+                                            person.stepCourtAppeal = 1
+                                            # patient_name, representative_name, region, mobile, diagnosis, drugs,
+                                            # rejection_reason, age, tgsk, disability, appeal_hospital, hold_medical_commission, ministry_health):
+
+                                            if(person.rejection_reason == "Другое"):
+                                                print()
+                                                # тут отправка сообщения оператору НКО
+                                            else:
+                                                data = start.renew_table()
+                                                temp_for_reason = ["Препарата нет в продаже", "Нет инструкции", "Отсутствие инвалидности", "Не является необходимым для жизни", "Вместо льгот деньги", "Нарушение прав"]
+                                                res_reason = ""
+                                                for j in range(len(temp_for_reason)):
+                                                    if(temp_for_reason[j] == person.rejection_reason):
+                                                        res_reason = j + 1
+                                                        break
+                                                data = {}
+                                                data['representative_name'] = person.representative_name
+                                                data['patient_name'] = person.patient_name
+                                                data['address'] = person.region
+                                                data['illness'] = person.diagnosis
+                                                data['medicine'] = person.drugs
+                                                data['telephone'] = person.mobile
+                                                data['reason'] = res_reason
+                                                data['if_tgsk'] = person.tgsk.lower() == 'да'
+                                                data['if_invalid'] = person.disability.lower() == 'да'
+                                                data['if_hospital'] = person.appeal_hospital.lower() == 'да'
+                                                data['if_comission'] = person.hold_medical_commission.lower() == 'да'
+                                                data['if_minzdrav'] = person.ministry_health.lower() == 'да'
+                                                data['if_older_3'] = int(person.age) >= 3
+
+                                                doc = clf.request_processing(data)
+                                                start.send_mail(person.email, doc)
+
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!",
+                                                               "random_id": 0})
+                                        elif (response == "Нет, я не обращался(лась) в суд"):
+                                            person.court_appeal = "Нет"
+                                            person.stepCourtAppeal = 1
+
+                                            if (person.rejection_reason == "Другое"):
+                                                print()
+                                                # тут отправка сообщения оператору НКО
+                                            else:
+                                                data = start.renew_table()
+                                                temp_for_reason = ["Препарата нет в продаже", "Нет инструкции",
+                                                                   "Отсутствие инвалидности",
+                                                                   "Не является необходимым для жизни",
+                                                                   "Вместо льгот деньги", "Нарушение прав"]
+                                                res_reason = ""
+                                                for j in range(len(temp_for_reason)):
+                                                    if (temp_for_reason[j] == person.rejection_reason):
+                                                        res_reason = j + 1
+                                                        break
+                                                data = {}
+                                                data['representative_name'] = person.representative_name
+                                                data['patient_name'] = person.patient_name
+                                                data['address'] = person.region
+                                                data['illness'] = person.diagnosis
+                                                data['medicine'] = person.drugs
+                                                data['telephone'] = person.mobile
+                                                data['reason'] = res_reason
+                                                data['if_tgsk'] = person.tgsk.lower() == 'да'
+                                                data['if_invalid'] = person.disability.lower() == 'да'
+                                                data['if_hospital'] = person.appeal_hospital.lower() == 'да'
+                                                data['if_comission'] = person.hold_medical_commission.lower() == 'да'
+                                                data['if_minzdrav'] = person.ministry_health.lower() == 'да'
+                                                data['if_older_3'] = int(person.age) >= 3
+
+                                                doc = clf.request_processing(data)
+                                                start.send_mail(person.email, doc)
+
+                                            vk_session.method("messages.send",
+                                                              {"user_id": event.user_id,
+                                                               "message": "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!",
+                                                               "random_id": 0})
+                                elif((intents == "причина_отказа" and len(entities) < 1) or (intents == "" and person.stepRejectionReason != 1 and person.stepPatientName != 1 and person.stepRepresentativeName != 1 and person.stepRegion != 1 and
+                                                                                             person.stepAge != 1 and person.stepDiagnosis != 1 and person.stepDisability != 1 and person.stepTgsk != 1 and
+                                                                                             person.stepDrugs != 1 and person.stepEmail != 1 and person.stepMobile != 1 and person.stepHelpWithDrugs != 1 and
+                                                                                             person.stepAppealHospital != 1 and person.stepCourtAppeal != 1 and person.stepHoldMedicalCommission != 1 and
+                                                                                             person.stepMinistryHealth != 1 and person.stepProsecutor != 1)):
                                     vk_session.method("messages.send",
-                                                      {"user_id": event.user_id,
-                                                       "message": "Перечислите препараты, прописанные пациенту через запятую :",
+                                                      {"user_id": event.user_id, "message": "Ваша причина относится к категории \"Другое\". После заполнения заявления с вами свяжется специалист.",
                                                        "random_id": 0})
-                                else:
+                                    person.rejection_reason = "Другое"
+                                    person.stepRejectionReason = 1  # заполнили причину отказа
                                     vk_session.method("messages.send",
                                                       {"user_id": event.user_id,
-                                                       "message": "У пациента есть инвалидность ?",
-                                                       "random_id": 0,
-                                                       'keyboard':check_disability()})
-                            elif(response == "Да, ТГСК была проведена"):
-                                person.stepForDisability = 1
-                                person.stepTgsk = 1
-                                person.tgsk = "Да"
-                                if (person.rejection_reason == "Отсутствие инвалидности"):
-                                    person.stepDisability = 1
-                                    person.disability = "Нет"
-                                    vk_session.method("messages.send",
-                                                      {"user_id": event.user_id,
-                                                       "message": "Перечислите препараты, прописанные пациенту через запятую :",
+                                                       "message": "Причина записана! [" + person.rejection_reason + "]",
                                                        "random_id": 0})
-                                else:
                                     vk_session.method("messages.send",
                                                       {"user_id": event.user_id,
-                                                       "message": "У пациента есть инвалидность ?",
+                                                       "message": "Введите ФИО пациента :",
+                                                       "random_id": 0})
+                                # если пользователь ввёл что-то не то, что нужно
+                                elif(len(entities) < 1 and person.stepForDiagnosis == 0 and person.stepForTgsk == 0 and person.stepForDisability == 0 and person.stepForEmail == 0 and
+                                     person.stepForMobile == 0 and person.stepForRepresentativeName == 0 and person.stepForCheckNeed == 0 and person.stepForCheckNeed == 0):
+                                    vk_session.method("messages.send",
+                                                      {"user_id": event.user_id, "message": "Привет! Выбери услугу:",
                                                        "random_id": 0,
-                                                       'keyboard': check_disability()})
-                        elif (person.stepDisability != 1 and person.stepTgsk == 1):
-                            print("Инвалидность")
-                            if(response == "Да, инвалидность есть"):
-                                person.stepDisability = 1
-                                person.disability = "Да"
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Перечислите препараты, прописанные пациенту через запятую :",
-                                                   "random_id": 0})
-                            elif(response == "Инвалидность отсутствует"):
-                                person.stepDisability = 1
-                                person.disability = "Нет"
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Перечислите препараты, прописанные пациенту через запятую :",
-                                                   "random_id": 0})
-                        elif (person.stepDrugs != 1 and person.stepDisability == 1):
-                            print("Препараты")
-                            res = response.split(',')
-                            for j in range(len(res)):
-                                person.drugs += res[j].strip()
-                            person.stepDrugs = 1
-                            person.stepForEmail = 1
-                            vk_session.method("messages.send",
-                                              {"user_id": event.user_id,
-                                               "message": "Введите контактный E-mail :",
-                                               "random_id": 0})
-                        elif (person.stepEmail != 1 and person.stepDrugs == 1):
-                            print("Email")
-                            person.email = response
-                            person.stepEmail = 1
-                            person.stepForMobile = 1
-                            vk_session.method("messages.send",
-                                              {"user_id": event.user_id,
-                                               "message": "Введите контактный телефон :",
-                                               "random_id": 0})
-                        elif (person.stepMobile != 1 and person.stepEmail == 1):
-                            print("Телефон")
-                            person.mobile = response
-                            person.stepMobile = 1
-                            person.stepForCheckNeed = 1
-                            vk_session.method("messages.send",
-                                              {"user_id": event.user_id,
-                                               "message": "Нужна помощь с препаратами от фонда ?",
-                                               "random_id": 0,
-                                               "keyboard": check_help_with_drugs()})
-                        elif (person.stepHelpWithDrugs != 1 and person.stepMobile == 1):
-                            if(response == "Да, помощь с препаратами нужна"):
-                                person.help_with_drugs = "Да"
-                                person.stepHelpWithDrugs = 1
-                                person.stepForQuestions = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в больницу по месту жительства ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_request_hospital()})
-                            elif(response == "Нет, помощь с препаратами не нужна"):
-                                person.help_with_drugs = "Нет"
-                                person.stepHelpWithDrugs = 1
-                                person.stepForQuestions = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Обращались ли вы в больницу по месту жительства ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_request_hospital()})
-                        elif (person.stepAppealHospital != 1 and person.stepHelpWithDrugs == 1):
-                            if(response == "Да, в больницу обращался(лась)"):
-                                person.appeal_hospital = "Да"
-                                person.stepAppealHospital = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Была проведена врачебная комиссия ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_medical_commission()})
-                            elif(response == "Нет, в больницу не обращался(лась)"):
-                                person.appeal_hospital = "Нет"
-                                person.stepAppealHospital = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Была проведена врачебная комиссия ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_medical_commission()})
-                        elif (person.stepHoldMedicalCommission != 1 and person.stepHelpWithDrugs == 1):
-                            if(response == "Да, была проведена"):
-                                person.hold_medical_commission = "Да"
-                                person.stepHoldMedicalCommission = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в орган исполнительной власти в сфере здравоохранения (Минздрав) ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_ministry_health()})
-                            elif(response == "Нет, не была проведена"):
-                                person.hold_medical_commission = "Нет"
-                                person.stepHoldMedicalCommission = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в орган исполнительной власти в сфере здравоохранения (Минздрав) ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_ministry_health()})
-                        elif (person.stepMinistryHealth != 1 and person.stepHoldMedicalCommission == 1):
-                            if (response == "Да, в Минздрав обращался(лась)"):
-                                person.ministry_health = "Да"
-                                person.stepMinistryHealth = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в контроллирующие органы государственной власти (Прокуратуру и Росздравнадзор) ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_prosecutor()})
-                            elif (response == "Нет, в Минздрав не обращался(лась)"):
-                                person.ministry_health = "Нет"
-                                person.stepMinistryHealth = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в контроллирующие органы государственной власти (Прокуратуру и Росздравнадзор) ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_prosecutor()})
-                        elif (person.stepProsecutor != 1 and person.stepMinistryHealth == 1):
-                            if (response == "Да, в Прокуратуру"):
-                                person.prosecutor = "Да"
-                                person.stepProsecutor = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в суд ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_court()})
-                            elif (response == "Да, в Росздравнадзор"):
-                                person.prosecutor = "Да"
-                                person.stepProsecutor = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в суд ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_court()})
-                            elif (response == "Нет, я никуда не обращался"):
-                                person.prosecutor = "Нет"
-                                person.stepProsecutor = 1
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Вы обращались в суд ?",
-                                                   "random_id": 0,
-                                                   "keyboard": check_court()})
-                        elif (person.stepCourtAppeal != 1 and person.stepProsecutor == 1):
-                            if (response == "Да, я обращался(лась) в суд"):
-                                person.court_appeal = "Да"
-                                person.stepCourtAppeal = 1
-                                # patient_name, representative_name, region, mobile, diagnosis, drugs,
-                                # rejection_reason, age, tgsk, disability, appeal_hospital, hold_medical_commission, ministry_health):
-
-                                if(person.rejection_reason == "Другое"):
-                                    print()
-                                    # тут отправка сообщения оператору НКО
-                                else:
-                                    data = start.renew_table()
-                                    temp_for_reason = ["Препарата нет в продаже", "Нет инструкции", "Отсутствие инвалидности", "Не является необходимым для жизни", "Вместо льгот деньги", "Нарушение прав"]
-                                    res_reason = ""
-                                    for j in range(len(temp_for_reason)):
-                                        if(temp_for_reason[j] == person.rejection_reason):
-                                            res_reason = j + 1
-                                            break
-                                    data = {}
-                                    data['representative_name'] = person.representative_name
-                                    data['patient_name'] = person.patient_name
-                                    data['address'] = person.region
-                                    data['illness'] = person.diagnosis
-                                    data['medicine'] = person.drugs
-                                    data['telephone'] = person.mobile
-                                    data['reason'] = res_reason
-                                    data['if_tgsk'] = person.tgsk.lower() == 'да'
-                                    data['if_invalid'] = person.disability.lower() == 'да'
-                                    data['if_hospital'] = person.appeal_hospital.lower() == 'да'
-                                    data['if_comission'] = person.hold_medical_commission.lower() == 'да'
-                                    data['if_minzdrav'] = person.ministry_health.lower() == 'да'
-                                    data['if_older_3'] = int(person.age) >= 3
-
-                                    doc = clf.request_processing(data)
-                                    start.send_mail(person.email, doc)
-
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!",
-                                                   "random_id": 0})
-                            elif (response == "Нет, я не обращался(лась) в суд"):
-                                person.court_appeal = "Нет"
-                                person.stepCourtAppeal = 1
-
-                                # тут дерево решений и отправка на почту
-
-                                vk_session.method("messages.send",
-                                                  {"user_id": event.user_id,
-                                                   "message": "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!",
-                                                   "random_id": 0})
-                    elif((intents == "причина_отказа" and len(entities) < 1) or (intents == "" and person.stepRejectionReason != 1 and person.stepPatientName != 1 and person.stepRepresentativeName != 1 and person.stepRegion != 1 and
-                                                                                 person.stepAge != 1 and person.stepDiagnosis != 1 and person.stepDisability != 1 and person.stepTgsk != 1 and
-                                                                                 person.stepDrugs != 1 and person.stepEmail != 1 and person.stepMobile != 1 and person.stepHelpWithDrugs != 1 and
-                                                                                 person.stepAppealHospital != 1 and person.stepCourtAppeal != 1 and person.stepHoldMedicalCommission != 1 and
-                                                                                 person.stepMinistryHealth != 1 and person.stepProsecutor != 1)):
-                        vk_session.method("messages.send",
-                                          {"user_id": event.user_id, "message": "Ваша причина относится к категории \"Другое\". После заполнения заявления с вами свяжется специалист.",
-                                           "random_id": 0})
-                        person.rejection_reason = "Другое"
-                        person.stepRejectionReason = 1  # заполнили причину отказа
-                        vk_session.method("messages.send",
-                                          {"user_id": event.user_id,
-                                           "message": "Причина записана! [" + person.rejection_reason + "]",
-                                           "random_id": 0})
-                        vk_session.method("messages.send",
-                                          {"user_id": event.user_id,
-                                           "message": "Введите ФИО пациента :",
-                                           "random_id": 0})
-                    # если пользователь ввёл что-то не то, что нужно
-                    elif(len(entities) < 1 and person.stepForDiagnosis == 0 and person.stepForTgsk == 0 and person.stepForDisability == 0 and person.stepForEmail == 0 and
-                         person.stepForMobile == 0 and person.stepForRepresentativeName == 0 and person.stepForCheckNeed == 0 and person.stepForCheckNeed == 0):
-                        vk_session.method("messages.send",
-                                          {"user_id": event.user_id, "message": "Привет! Выбери услугу:",
-                                           "random_id": 0,
-                                           "keyboard": start_keyboard()})
-                    elif(len(entities) > 1):
-                        vk_session.method("messages.send",
-                                      {"user_id": event.user_id, "message": "Уточните, что вы имели ввиду:", "random_id": 0,
-                                       'keyboard': accuracy_keyboard(entities)})
-                #print(intents)
-                #print("————————————————")
-
-                # удаление сессии
-                service.delete_session("55340594-28fd-4e4a-879a-69b0c6f2fa04", session['session_id']).get_result()
+                                                       "keyboard": start_keyboard()})
+                                elif(len(entities) > 1):
+                                    vk_session.method("messages.send",
+                                                  {"user_id": event.user_id, "message": "Уточните, что вы имели ввиду:", "random_id": 0,
+                                                   'keyboard': accuracy_keyboard(entities)})
+                            #print(intents)
+                            #print("————————————————")
+                    except ibm_watson.ApiException:
+                        print("505 ошибка IBM Cloud")
