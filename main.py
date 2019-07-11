@@ -1,17 +1,20 @@
 import json
 
 # Для работа с Watson Assistant
-from os.path import join, dirname
+import os
 from threading import Thread
 
 import ibm_watson
 
 import urllib.request
 
-from ibm_watson import SpeechToTextV1
+import speech_recognition as sr
 
-from ibm_watson.websocket import RecognizeCallback, AudioSource
-import threading
+import soundfile as sf
+
+import subprocess
+
+import random
 
 from DataPerson import DataPerson
 from Keyboards import default_keyboard
@@ -27,6 +30,8 @@ import vk_api
 # Классификация шаблонов и отправка
 from SMTP import send_mail
 from PatternDetect import processing, request_processing
+
+r = sr.Recognizer()
 
 # Отправка сообщений в ВК
 def sendMessageToVK(user_id, message, keyboard = ""):
@@ -46,28 +51,6 @@ service = ibm_watson.AssistantV2(
         version='2019-02-28',
         url='https://gateway-lon.watsonplatform.net/assistant/api',
         iam_apikey='NGzCvJ0F7EPmWBLBJbD2pdwA5oqkFWtOur-lNJ-9OxGH')
-
-# speech_to_text = SpeechToTextV1(
-#     iam_apikey='slmVlYwBO1nEw4qKTcLgMMUtea9jCtm93DcsfN5Z3RUH',
-#     url='https://gateway-lon.watsonplatform.net/speech-to-text/api'
-# )
-#
-#
-# mp3file = urllib.request.urlopen("https://psv4.userapi.com/c852532//u135828303/audiomsg/d2/abd866cbe2.mp3")
-#
-# with open('voice_message.mp3','wb') as output:
-#   output.write(mp3file.read())
-#
-# models = speech_to_text.list_models().get_result()
-# model = speech_to_text.get_model('en-US_BroadbandModel').get_result()
-# with open(join(dirname(__file__), 'voice_message.mp3'),
-#           'rb') as audio_file:
-#     speech_recognition_results = speech_to_text.recognize(
-#             audio=audio_file,
-#             content_type='audio/mp3',
-#             timestamps=True,
-#             word_confidence=True).get_result()
-# print(json.dumps(speech_recognition_results, indent=2))
 
 # Инициализация для выяввления ФИО
 extractor = NamesExtractor()
@@ -105,6 +88,38 @@ def search_partial_text(src, dst):
     r1 = int(result / len(src) * 100)
     r2 = int(result / len(dst) * 100)
     return '{}'.format(r1 if r1 < r2 else r2)
+
+# temp_url = "https://psv4.userapi.com/c852420//u135828303/audiomsg/d17/1444b370e9.ogg"
+#
+# oggfile = urllib.request.urlopen(temp_url).read()
+#
+# rand_t = random.randint(1, 10000)
+#
+# filen_in = "message"  + str(rand_t) + ".ogg"
+# filen_out = "message"  + str(rand_t) + ".wav"
+#
+# with open('message.ogg','wb') as output:
+#     output.write(oggfile)
+#
+# command = "ffmpeg -i " + 'message.ogg' + " " + 'message.wav'
+# subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+#
+# hard = sr.AudioFile(os.path.abspath('message.wav'))
+# with hard as source:
+#     audio = r.record((source))
+# res = ""
+# try:
+#     res = r.recognize_google(audio, language="ru-RU").lower()
+# except sr.UnknownValueError:
+#     print("Ничего не сказано!")
+
+# if path.isfile(path.abspath(filen_in)):
+#     remove(path.abspath(filen_in))
+# if path.isfile(path.abspath(filen_out)):
+#     remove(path.abspath(filen_out))
+# print(res)
+# response = res
+
 def startBot():
     while True:
         # Даныне пациентов
@@ -117,9 +132,43 @@ def startBot():
             if event.type == VkEventType.MESSAGE_NEW:
                 response = event.text
 
-                #messages = vk_session.method("messages.getConversations", {"offset": 0, "count": 200, "filter": "all"})
+                messages = vk_session.method("messages.getConversations", {"offset": 0, "count": 200, "filter": "all"})
+                print(len(messages["items"][0]["last_message"]["attachments"]))
                 #print(json.dumps(messages, indent=2))
-                #break
+                if(len(messages["items"][0]["last_message"]["attachments"]) >= 1):
+
+                    temp_url = messages["items"][0]["last_message"]["attachments"][0]["audio_message"]["link_ogg"]
+
+                    oggfile = urllib.request.urlopen(temp_url).read()
+
+                    rand_t = random.randint(1, 10000)
+
+                    filen_in = "message" + str(rand_t) + ".ogg"
+                    filen_out = "message" + str(rand_t) + ".wav"
+
+                    with open(filen_in, 'wb') as output:
+                        output.write(oggfile)
+
+                    command = "ffmpeg -i " + filen_in + " " + filen_out
+                    subprocess.run(command, shell=True)
+
+                    hard = sr.AudioFile(os.path.abspath(filen_out))
+                    with hard as source:
+                        audio = r.record(source)
+                    res = ""
+                    try:
+                        res = r.recognize_google(audio, language="ru-RU").lower()
+                    except sr.UnknownValueError:
+                        print("Ничего не сказано!")
+
+                    if os.path.isfile(os.path.abspath(filen_out)):
+                        os.remove(os.path.abspath(filen_out))
+
+                    print(res)
+                    response = res
+
+                    # if os.path.isfile(os.path.abspath(filen_in)):
+                    #     os.remove(os.path.abspath(filen_in))
 
                 person = DataPerson("", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, 0,
                                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
