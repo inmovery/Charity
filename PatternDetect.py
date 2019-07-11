@@ -1,12 +1,11 @@
-#!/usr/bin/env python
 # coding: utf-8
 import os
 
 from docx import Document
 from docx.shared import Pt
 
-def processing(document, patient_name, representative_name, address, telephone,
-               illness, medicine):
+# Заполнение документа
+def processing(document, patient_name, representative_name, address, telephone, illness, medicine):
     style = document.styles['Normal']
     font = style.font
     font.name = 'Times New Roman'
@@ -31,7 +30,9 @@ def processing(document, patient_name, representative_name, address, telephone,
 
     return document
 
+# Определение шаблона
 def request_processing(data):
+    # data — словарь :
     # patient_name, representative_name, address, telephone, illness, medicine,
     # reason, if_older_3, if_tgsk, if_invalid, if_hospital, if_comission, if_minzdrav
 

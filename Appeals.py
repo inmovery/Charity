@@ -1,76 +1,12 @@
-import json
-
-# Для работа с Watson Assistant
-from os.path import join, dirname
-from threading import Thread
-
-import ibm_watson
-
-import urllib.request
-
-from ibm_watson import SpeechToTextV1
-
-from ibm_watson.websocket import RecognizeCallback, AudioSource
-import threading
-
-from DataPerson import DataPerson
-from Keyboards import default_keyboard
 import Config
-
-# Для определения ФИО
-from natasha import NamesExtractor
-
-# Для взаимодействия с ВК
-from vk_api.longpoll import VkLongPoll, VkEventType
-import vk_api
+from main import sendMessageToVK, extractor, service
+from vk_api.longpoll import VkEventType
+from Keyboards import default_keyboard
+import ibm_watson
 
 # Классификация шаблонов и отправка
 from SMTP import send_mail
 from PatternDetect import processing, request_processing
-
-# Отправка сообщений в ВК
-def sendMessageToVK(user_id, message, keyboard = ""):
-    vk_session.method("messages.send",
-                      {"user_id": user_id,
-                       "message": message,
-                       "random_id": 0,
-                       "keyboard": keyboard})
-
-token = Config.TOKEN_VK
-vk_session = vk_api.VkApi(token=token)
-session_api = vk_session.get_api()
-longpoll = VkLongPoll(vk_session)
-print("Бот запустился")
-
-service = ibm_watson.AssistantV2(
-        version='2019-02-28',
-        url='https://gateway-lon.watsonplatform.net/assistant/api',
-        iam_apikey='NGzCvJ0F7EPmWBLBJbD2pdwA5oqkFWtOur-lNJ-9OxGH')
-
-# speech_to_text = SpeechToTextV1(
-#     iam_apikey='slmVlYwBO1nEw4qKTcLgMMUtea9jCtm93DcsfN5Z3RUH',
-#     url='https://gateway-lon.watsonplatform.net/speech-to-text/api'
-# )
-#
-#
-# mp3file = urllib.request.urlopen("https://psv4.userapi.com/c852532//u135828303/audiomsg/d2/abd866cbe2.mp3")
-#
-# with open('voice_message.mp3','wb') as output:
-#   output.write(mp3file.read())
-#
-# models = speech_to_text.list_models().get_result()
-# model = speech_to_text.get_model('en-US_BroadbandModel').get_result()
-# with open(join(dirname(__file__), 'voice_message.mp3'),
-#           'rb') as audio_file:
-#     speech_recognition_results = speech_to_text.recognize(
-#             audio=audio_file,
-#             content_type='audio/mp3',
-#             timestamps=True,
-#             word_confidence=True).get_result()
-# print(json.dumps(speech_recognition_results, indent=2))
-
-# Инициализация для выяввления ФИО
-extractor = NamesExtractor()
 
 # Массив возможных диагнозов
 list_diagnoses = ["Иммунодефицит неуточненный", "Дефект в системе комплемента", "Общий вариабельный иммунодефицит",
@@ -105,68 +41,49 @@ def search_partial_text(src, dst):
     r1 = int(result / len(src) * 100)
     r2 = int(result / len(dst) * 100)
     return '{}'.format(r1 if r1 < r2 else r2)
-def startBot():
-    while True:
-        # Даныне пациентов
-        data_person = {}
 
-        # Для отслеживания потока пользователей
-        unique_users = []
+def startStatement(person, longpoll):
+    for event in longpoll.listen():
+        if event.type == VkEventType.MESSAGE_NEW:
+            response = event.text
 
-        for event in longpoll.listen():
-            if event.type == VkEventType.MESSAGE_NEW:
-                response = event.text
+            try:
 
-                #messages = vk_session.method("messages.getConversations", {"offset": 0, "count": 200, "filter": "all"})
-                #print(json.dumps(messages, indent=2))
-                #break
+                # Создание сессии
+                session = service.create_session(Config.ASSISTANT_ID).get_result()
 
-                person = DataPerson("", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, 0,
-                                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-                try:
-                    if (event.user_id in unique_users):  # Пользователь уже записан
-                        person = data_person[str(event.user_id)]
-                        unique_users = set(unique_users)
-                        unique_users = list(unique_users)
-                    else:  # Пользователь ещё не обращался к боту
-                        unique_users.append(event.user_id)
+                # получение резалта
+                resp = service.message(
+                    assistant_id=Config.ASSISTANT_ID,
+                    session_id=session['session_id'],
+                    input={
+                        'message_type': 'text',
+                        'text': response
+                    }
+                ).get_result()
 
-                    data_person[str(event.user_id)] = person
+                # Удаление сессии
+                service.delete_session(Config.ASSISTANT_ID,
+                                       session['session_id']).get_result()
 
-                    if event.from_user and not event.from_me:
+                if event.from_user and not event.from_me:
 
-                        # Создание сессии
-                        session = service.create_session(Config.ASSISTANT_ID).get_result()
+                    # Вычисление ФИО пациента или законного представителя
+                    matches = extractor(response)
+                    spans = [_.span for _ in matches]
+                    facts = [_.fact.as_json for _ in matches]
 
-                        # получение резалта
-                        resp = service.message(
-                            assistant_id=Config.ASSISTANT_ID,
-                            session_id=session['session_id'],
-                            input={
-                                'message_type': 'text',
-                                'text': response
-                            }
-                        ).get_result()
+                    intents = ""
+                    entities = resp["output"]["entities"]
 
-                        # Удаление сессии
-                        service.delete_session(Config.ASSISTANT_ID, session['session_id']).get_result()
-
-                        # Вычисление ФИО пациента или законного представителя
-                        matches = extractor(response)
-                        spans = [_.span for _ in matches]
-                        facts = [_.fact.as_json for _ in matches]
-
-                        intents = ""
-
-                        # начало бизнес-логики
-                        if (len(resp["output"]["intents"]) < 1 and len(facts) < 1 and response != "Получение заявления" and
-                                response != "вывод" and person.stepForDiagnosis != 1 and person.stepForTgsk != 1 and
-                                person.stepForDisability != 1 and person.stepForEmail != 1 and person.stepForMobile != 1 and
-                                person.stepForCheckNeed != 1 and person.stepForQuestions != 1 and person.stepForRepresentativeName != 1):
-                            sendMessageToVK(event.user_id, "Не балуйтесь! Вводите только запрашиваемые данные!")
-                        elif (len(resp["output"]["intents"]) == 1):
-                            intents = resp["output"]["intents"][0]["intent"]
-                        entities = resp["output"]["entities"]
+                    # начало бизнес-логики
+                    if (len(resp["output"]["intents"]) < 1 and len(facts) < 1 and response != "Получение заявления" and
+                            response != "вывод" and person.stepForDiagnosis != 1 and person.stepForTgsk != 1 and
+                            person.stepForDisability != 1 and person.stepForEmail != 1 and person.stepForMobile != 1 and
+                            person.stepForCheckNeed != 1 and person.stepForQuestions != 1 and person.stepForRepresentativeName != 1):
+                        sendMessageToVK(event.user_id, "Не балуйтесь! Вводите только запрашиваемые данные!")
+                    elif (len(resp["output"]["intents"]) == 1):
+                        intents = resp["output"]["intents"][0]["intent"]
 
                         # Вступительная часть
                         if (intents == "приветствие" and response != "Получение заявления"):
@@ -191,8 +108,7 @@ def startBot():
                                    "Обращение в суд: " + person.court_appeal
                             sendMessageToVK(event.user_id, temp)
                         elif (response == "Получение заявления"):
-                            sendMessageToVK(event.user_id,
-                                            "Продолжая общение с ботом вы соглашаетесь с обработкой ваших персональных данных.")
+                            sendMessageToVK(event.user_id, "Продолжая общение с ботом вы соглашаетесь с обработкой ваших персональных данных.")
                             sendMessageToVK(event.user_id, "По какой причине вам отказали :")
                         else:
                             # если нашлась 1 подходящая причина
@@ -230,8 +146,7 @@ def startBot():
                                         person.representative_name = ""
                                         person.stepCheckRepresentativeName = 1
                                         person.stepRepresentativeName = 1
-                                        sendMessageToVK(event.user_id,
-                                                        "Введите регион (республика, край, область, округ), в котором вы проживаете :")
+                                        sendMessageToVK(event.user_id, "Введите регион (республика, край, область, округ), в котором вы проживаете :")
                                     elif (response == "Нет, не является"):
                                         person.stepCheckRepresentativeName = 1
                                         sendMessageToVK(event.user_id, "Введите ФИО законного представителя :")
@@ -244,8 +159,7 @@ def startBot():
                                             facts[0]["first"]) + " " + toUpper(facts[0]["middle"])
                                     person.stepRepresentativeName = 1
                                     sendMessageToVK(event.user_id, "ФИО записаны! [" + person.representative_name + "]")
-                                    sendMessageToVK(event.user_id,
-                                                    "Введите регион (республика, край, область, округ), в котором вы проживаете:")
+                                    sendMessageToVK(event.user_id, "Введите регион (республика, край, область, округ), в котором вы проживаете:")
                                 elif (person.stepRegion != 1 and person.stepRepresentativeName == 1):
                                     print("Регион")
                                     if (intents == "регион"):
@@ -282,29 +196,26 @@ def startBot():
                                         person.stepDiagnosis = 1
                                         person.diagnosis = response
                                         sendMessageToVK(event.user_id, "Диагноз записан! [" + person.diagnosis + "]")
-                                        sendMessageToVK(event.user_id,
-                                                        "У пациента была проведена ТГСК (Трансплантация гемопоэтических стволовых клеток) :",
+                                        sendMessageToVK(event.user_id, "У пациента была проведена ТГСК (Трансплантация гемопоэтических стволовых клеток) :",
                                                         default_keyboard(["Нет, ТГСК не была проведена",
-                                                                          "Да, ТГСК была проведена"]))
+                                                                                         "Да, ТГСК была проведена"]))
                                     else:
                                         for j in range(len(list_diagnoses)):
-                                            if (int(search_partial_text(response.lower(),
-                                                                        list_diagnoses[j].lower())) < 100):
+                                            if (int(search_partial_text(response.lower(), list_diagnoses[j].lower())) < 100):
                                                 temp_for[str(list_diagnoses[j])] = int(
                                                     search_partial_text(response.lower(), list_diagnoses[j].lower()))
                                         list_temp_for = list(temp_for.items())
                                         list_temp_for.sort(key=lambda i: i[1])
                                         d = 0
                                         for j in list_temp_for:
-                                            # print(str(j[0]) + " : " + str(j[1]))
+                                            #print(str(j[0]) + " : " + str(j[1]))
                                             d = d + 1
                                             if (d == 14):
                                                 two = j[0]
                                             elif (d == 15):
                                                 one = j[0]
                                         prepare = [one, two]
-                                        sendMessageToVK(event.user_id, "Возможно вы имели ввиду :",
-                                                        default_keyboard(prepare))
+                                        sendMessageToVK(event.user_id, "Возможно вы имели ввиду :", default_keyboard(prepare))
                                 elif (person.stepTgsk != 1 and person.stepDiagnosis == 1):
                                     print("ТГСК")
                                     if (response == "Нет, ТГСК не была проведена"):
@@ -313,12 +224,10 @@ def startBot():
                                         if (person.rejection_reason == "Отсутствие инвалидности"):
                                             person.stepDisability = 1
                                             person.disability = "Нет"
-                                            sendMessageToVK(event.user_id,
-                                                            "Перечислите препараты, прописанные пациенту через запятую :")
+                                            sendMessageToVK(event.user_id, "Перечислите препараты, прописанные пациенту через запятую :")
                                         else:
-                                            sendMessageToVK(event.user_id, "У пациента есть инвалидность ?",
-                                                            default_keyboard(["Да, инвалидность есть",
-                                                                              "Инвалидность отсутствует"]))
+                                            sendMessageToVK(event.user_id, "У пациента есть инвалидность ?", default_keyboard(["Да, инвалидность есть",
+                                                                                             "Инвалидность отсутствует"]))
                                     elif (response == "Да, ТГСК была проведена"):
                                         person.stepForDisability = 1
                                         person.stepTgsk = 1
@@ -326,19 +235,16 @@ def startBot():
                                         if (person.rejection_reason == "Отсутствие инвалидности"):
                                             person.stepDisability = 1
                                             person.disability = "Нет"
-                                            sendMessageToVK(event.user_id,
-                                                            "Перечислите препараты, прописанные пациенту через запятую :")
+                                            sendMessageToVK(event.user_id, "Перечислите препараты, прописанные пациенту через запятую :")
                                         else:
-                                            sendMessageToVK(event.user_id, "У пациента есть инвалидность ?",
-                                                            default_keyboard(["Да, инвалидность есть",
-                                                                              "Инвалидность отсутствует"]))
+                                            sendMessageToVK(event.user_id, "У пациента есть инвалидность ?", default_keyboard(["Да, инвалидность есть",
+                                                                                             "Инвалидность отсутствует"]))
                                 elif (person.stepDisability != 1 and person.stepTgsk == 1):
                                     print("Инвалидность")
                                     if (response == "Да, инвалидность есть"):
                                         person.stepDisability = 1
                                         person.disability = "Да"
-                                        sendMessageToVK(event.user_id,
-                                                        "Перечислите препараты, прописанные пациенту через запятую :")
+                                        sendMessageToVK(event.user_id, "Перечислите препараты, прописанные пациенту через запятую :")
                                     elif (response == "Инвалидность отсутствует"):
                                         person.stepDisability = 1
                                         person.disability = "Нет"
@@ -364,23 +270,20 @@ def startBot():
                                     person.stepMobile = 1
                                     person.stepForCheckNeed = 1
                                     sendMessageToVK(event.user_id, "Нужна помощь с препаратами от фонда ?",
-                                                    default_keyboard(["Да, помощь с препаратами нужна",
-                                                                      "Нет, помощь с препаратами не нужна"]))
+                                                    default_keyboard(["Да, помощь с препаратами нужна", "Нет, помощь с препаратами не нужна"]))
                                 elif (person.stepHelpWithDrugs != 1 and person.stepMobile == 1):
                                     if (response == "Да, помощь с препаратами нужна"):
                                         person.help_with_drugs = "Да"
                                         person.stepHelpWithDrugs = 1
                                         person.stepForQuestions = 1
                                         sendMessageToVK(event.user_id, "Вы обращались в больницу по месту жительства ?",
-                                                        default_keyboard(["Да, в больницу обращался(лась)",
-                                                                          "Нет, в больницу не обращался(лась)"]))
+                                                        default_keyboard(["Да, в больницу обращался(лась)", "Нет, в больницу не обращался(лась)"]))
                                     elif (response == "Нет, помощь с препаратами не нужна"):
                                         person.help_with_drugs = "Нет"
                                         person.stepHelpWithDrugs = 1
                                         person.stepForQuestions = 1
                                         sendMessageToVK(event.user_id, "Обращались ли вы в больницу по месту жительства ?",
-                                                        default_keyboard(["Да, в больницу обращался(лась)",
-                                                                          "Нет, в больницу не обращался(лась)"]))
+                                                        default_keyboard(["Да, в больницу обращался(лась)", "Нет, в больницу не обращался(лась)"]))
                                 elif (person.stepAppealHospital != 1 and person.stepHelpWithDrugs == 1):
                                     if (response == "Да, в больницу обращался(лась)"):
                                         person.appeal_hospital = "Да"
@@ -413,8 +316,7 @@ def startBot():
                                         person.stepMinistryHealth = 1
                                         sendMessageToVK(event.user_id,
                                                         "Вы обращались в контроллирующие органы государственной власти (Прокуратуру и Росздравнадзор) ?",
-                                                        default_keyboard(["Да, в Прокуратуру", "Да, в Росздравнадзор",
-                                                                          "Нет, я никуда не обращался"]))
+                                                        default_keyboard(["Да, в Прокуратуру", "Да, в Росздравнадзор", "Нет, я никуда не обращался"]))
                                     elif (response == "Нет, в Минздрав не обращался(лась)"):
                                         person.ministry_health = "Нет"
                                         person.stepMinistryHealth = 1
@@ -427,20 +329,17 @@ def startBot():
                                         person.prosecutor = "Да"
                                         person.stepProsecutor = 1
                                         sendMessageToVK(event.user_id, "Вы обращались в суд ?",
-                                                        default_keyboard(["Да, я обращался(лась) в суд",
-                                                                          "Нет, я не обращался(лась) в суд"]))
+                                                        default_keyboard(["Да, я обращался(лась) в суд", "Нет, я не обращался(лась) в суд"]))
                                     elif (response == "Да, в Росздравнадзор"):
                                         person.prosecutor = "Да"
                                         person.stepProsecutor = 1
                                         sendMessageToVK(event.user_id, "Вы обращались в суд ?",
-                                                        default_keyboard(["Да, я обращался(лась) в суд",
-                                                                          "Нет, я не обращался(лась) в суд"]))
+                                                        default_keyboard(["Да, я обращался(лась) в суд", "Нет, я не обращался(лась) в суд"]))
                                     elif (response == "Нет, я никуда не обращался"):
                                         person.prosecutor = "Нет"
                                         person.stepProsecutor = 1
                                         sendMessageToVK(event.user_id, "Вы обращались в суд ?",
-                                                        default_keyboard(["Да, я обращался(лась) в суд",
-                                                                          "Нет, я не обращался(лась) в суд"]))
+                                                        default_keyboard(["Да, я обращался(лась) в суд", "Нет, я не обращался(лась) в суд"]))
                                 elif (person.stepCourtAppeal != 1 and person.stepProsecutor == 1):
                                     if (response == "Да, я обращался(лась) в суд"):
                                         person.court_appeal = "Да"
@@ -479,8 +378,7 @@ def startBot():
                                             doc = request_processing(data)
                                             send_mail(person.email, doc)
 
-                                        sendMessageToVK(event.user_id,
-                                                        "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!")
+                                        sendMessageToVK(event.user_id, "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!")
                                     elif (response == "Нет, я не обращался(лась) в суд"):
                                         person.court_appeal = "Нет"
                                         person.stepCourtAppeal = 1
@@ -515,14 +413,15 @@ def startBot():
 
                                             doc = request_processing(data)
                                             send_mail(person.email, doc)
-                                            sendMessageToVK(event.user_id,
-                                                        "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!")
-                            elif ((intents == "причина_отказа" and len(entities) < 1) or (intents == "" and person.stepRejectionReason != 1 and person.stepPatientName != 1 and person.stepRepresentativeName != 1 and person.stepRegion != 1 and
-                                person.stepAge != 1 and person.stepDiagnosis != 1 and person.stepDisability != 1 and person.stepTgsk != 1 and
-                                person.stepDrugs != 1 and person.stepEmail != 1 and person.stepMobile != 1 and person.stepHelpWithDrugs != 1 and
-                                person.stepAppealHospital != 1 and person.stepCourtAppeal != 1 and person.stepHoldMedicalCommission != 1 and
-                                person.stepMinistryHealth != 1 and person.stepProsecutor != 1)):
-                                sendMessageToVK(event.user_id, "Ваша причина относится к категории \"Другое\". После заполнения заявления с вами свяжется специалист.")
+                                        sendMessageToVK(event.user_id, "Заявка на получение заявления успешно обработана.\nЗаявление с инструкцией отправлены на указанный E-mail: " + person.email + "\nСпасибо за обращение!")
+                            elif ((intents == "причина_отказа" and len(entities) < 1) or
+                                  (intents == "" and person.stepRejectionReason != 1 and person.stepPatientName != 1 and person.stepRepresentativeName != 1 and person.stepRegion != 1 and
+                                    person.stepAge != 1 and person.stepDiagnosis != 1 and person.stepDisability != 1 and person.stepTgsk != 1 and
+                                    person.stepDrugs != 1 and person.stepEmail != 1 and person.stepMobile != 1 and person.stepHelpWithDrugs != 1 and
+                                    person.stepAppealHospital != 1 and person.stepCourtAppeal != 1 and person.stepHoldMedicalCommission != 1 and
+                                    person.stepMinistryHealth != 1 and person.stepProsecutor != 1)):
+                                sendMessageToVK(event.user_id,
+                                                "Ваша причина относится к категории \"Другое\". После заполнения заявления с вами свяжется специалист.")
 
                                 person.rejection_reason = "Другое"
                                 person.stepRejectionReason = 1  # заполнили причину отказа
@@ -530,13 +429,11 @@ def startBot():
                                 sendMessageToVK(event.user_id, "Введите ФИО пациента :")
                             # если пользователь ввёл что-то не то, что нужно
                             elif (len(entities) < 1 and person.stepForDiagnosis == 0 and person.stepForTgsk == 0 and person.stepForDisability == 0 and person.stepForEmail == 0 and
-                                person.stepForMobile == 0 and person.stepForRepresentativeName == 0 and person.stepForCheckNeed == 0 and person.stepForCheckNeed == 0):
+                                  person.stepForMobile == 0 and person.stepForRepresentativeName == 0 and person.stepForCheckNeed == 0 and person.stepForCheckNeed == 0):
                                 sendMessageToVK(event.user_id, "Привет! Выбери услугу :", default_keyboard(["Получение заявления", "Проверить заявление"]))
                             elif (len(entities) > 1):
                                 prepare = getRejectionReasons(entities)
-                                sendMessageToVK(event.user_id, "Уточните, что вы имели ввиду :", default_keyboard(prepare))
-                except ibm_watson.ApiException:
-                    print("500 Error IBM Cloud")
-                    sendMessageToVK(event.user_id, "Произошла ошибка! Введите то же самое.")
-
-startBot()
+                                sendMessageToVK(event.user_id, "Привет! Выбери услугу :",
+                                                default_keyboard(prepare))
+            except ibm_watson.ApiException:
+                print("500 Error IBM Cloud")
